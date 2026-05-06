@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeuroTrack — Parkinson Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Syne:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 18 18" fill="none" width="18" height="18">
+        <path d="M9 2C9 2 4 5 4 10a5 5 0 0010 0c0-5-5-8-5-8z" stroke="white" stroke-width="1.5" fill="none"/>
+        <circle cx="9" cy="10" r="2" fill="white" opacity="0.8"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-text">NeuroTrack</div>
+      <div class="logo-sub">PARKINSON MONITOR v1.0</div>
+    </div>
+  </div>
+  <div class="status-bar">
+    <div style="display:flex;align-items:center;gap:6px">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-label mono" id="statusLabel">CONECTANDO...</span>
+    </div>
+    <div class="session-badge mono" id="sessionBadge">session: —</div>
+    <div class="session-badge mono" id="patientBadge">patient: —</div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- KPI row -->
+  <div class="kpi-row">
+    <div class="kpi" style="--kpi-color:#00e5a0">
+      <div class="kpi-label">EMG RMS</div>
+      <div class="kpi-val mono" id="kpiRms">—</div>
+      <div class="kpi-unit">mV</div>
+    </div>
+    <div class="kpi" style="--kpi-color:#0096ff">
+      <div class="kpi-label">Frec. EMG</div>
+      <div class="kpi-val mono" id="kpiFreqEmg">—</div>
+      <div class="kpi-unit">Hz</div>
+    </div>
+    <div class="kpi" style="--kpi-color:#ffa502">
+      <div class="kpi-label">Frec. ACC</div>
+      <div class="kpi-val mono" id="kpiFreqAcc">—</div>
+      <div class="kpi-unit">Hz</div>
+    </div>
+    <div class="kpi" style="--kpi-color:#ff4757">
+      <div class="kpi-label">Tremor</div>
+      <div class="kpi-val mono" id="kpiTremor" style="color:#4a5568">—</div>
+      <div class="kpi-unit" id="kpiTremorSub">esperando datos</div>
+    </div>
+    <div class="kpi" style="--kpi-color:#a29bfe">
+      <div class="kpi-label">Muestras</div>
+      <div class="kpi-val mono" id="kpiSamples">0</div>
+      <div class="kpi-unit">esta sesion</div>
+    </div>
+  </div>
+
+  <!-- 3D Panel -->
+  <div class="panel panel-3d">
+    <div class="panel-header">
+      <div class="panel-title">Orientacion 3D — MPU6050</div>
+      <div class="panel-tag">Three.js · tiempo real</div>
+    </div>
+    <canvas id="canvas3d"></canvas>
+    <div class="orient-grid">
+      <div class="orient-card">
+        <div class="orient-label">Roll</div>
+        <div class="orient-val roll mono" id="rollVal">0.0°</div>
+      </div>
+      <div class="orient-card">
+        <div class="orient-label">Pitch</div>
+        <div class="orient-val pitch mono" id="pitchVal">0.0°</div>
+      </div>
+      <div class="orient-card">
+        <div class="orient-label">|acc|</div>
+        <div class="orient-val acc mono" id="accVal">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EMG Panel -->
+  <div class="panel panel-emg">
+    <div class="panel-header">
+      <div class="panel-title">Señal EMG — MyoWare</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-sm" id="btnPause">Pausar</button>
+        <button class="btn-sm danger" id="btnClear">Limpiar</button>
+      </div>
+    </div>
+    <canvas id="emgCanvas"></canvas>
+    <div class="emg-footer">
+      <div class="emg-state">
+        <span style="font-size:10px;color:#8892a4">Estado:</span>
+        <span class="state-pill reposo" id="emgState">REPOSO</span>
+      </div>
+      <div class="emg-stats">
+        <div class="emg-stat">
+          <div class="emg-stat-label">Max</div>
+          <div class="emg-stat-val" id="emgMax">—</div>
+        </div>
+        <div class="emg-stat">
+          <div class="emg-stat-label">Min</div>
+          <div class="emg-stat-val" id="emgMin">—</div>
+        </div>
+        <div class="emg-stat">
+          <div class="emg-stat-label">Prom</div>
+          <div class="emg-stat-val" id="emgAvg">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="tremor-panel">
+      <div class="panel-header">
+        <div class="panel-title">Analisis tremor</div>
+        <div class="panel-tag" id="tremorTag">INACTIVO</div>
+      </div>
+      <div class="tremor-ring-wrap">
+        <svg width="130" height="130" viewBox="0 0 130 130">
+          <circle cx="65" cy="65" r="52" fill="none" stroke="#1c2330" stroke-width="12"/>
+          <circle cx="65" cy="65" r="52" fill="none" stroke="#00e5a0" stroke-width="12"
+            stroke-dasharray="326.7" stroke-dashoffset="326.7" stroke-linecap="round"
+            transform="rotate(-90 65 65)" id="tremorRing" style="transition:stroke-dashoffset 0.8s ease,stroke 0.5s"/>
+          <text x="65" y="60" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="22" font-weight="600" fill="#e8edf5" id="tremorPct">0%</text>
+          <text x="65" y="78" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#8892a4">tremor sesion</text>
+        </svg>
+      </div>
+      <div class="freq-grid">
+        <div class="freq-card">
+          <div class="freq-label">f EMG</div>
+          <div class="freq-val mono" id="fEmg">—</div>
+          <div class="freq-unit">Hz</div>
+        </div>
+        <div class="freq-card">
+          <div class="freq-label">f ACC</div>
+          <div class="freq-val mono" id="fAcc">—</div>
+          <div class="freq-unit">Hz</div>
+        </div>
+      </div>
+      <div class="tremor-range-note mono">rango parkinson: 3–7 Hz</div>
+    </div>
+
+    <div class="sessions-panel">
+      <div class="panel-header">
+        <div class="panel-title">Sesiones guardadas</div>
+        <button class="btn-sm" id="btnExport">Exportar CSV</button>
+      </div>
+      <div class="session-list" id="sessionList">
+        <div style="font-size:11px;color:#4a5568;text-align:center;padding:20px;font-family:'JetBrains Mono',monospace">
+          Cargando sesiones...
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+<script src="/static/js/arm3d.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
