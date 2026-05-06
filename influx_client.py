@@ -68,6 +68,7 @@ def write_features(data: dict):
 
 
 def _safe_write(points, retries=3):
+      global _client
       for attempt in range(retries):
           try:
               get_client().write_points(points)

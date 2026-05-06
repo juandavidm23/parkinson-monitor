@@ -2,7 +2,9 @@
 # app.py — Flask + SocketIO + API REST
 # =============================================
 
-from flask import Flask, render_template, jsonify, request
+import io
+import csv
+from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO
 import influx_client as db
 import processor
@@ -49,6 +51,35 @@ def api_session_features(session_id):
         "tremor_pct":  tremor_pct,
         "count":       len(features)
     })
+
+
+@app.route("/api/sessions/summary")
+def api_sessions_summary():
+    """Lista de sesiones con porcentaje de tremor."""
+    summary = db.query_sessions_summary()
+    return jsonify({"sessions": summary})
+
+
+@app.route("/api/session/<session_id>/export.csv")
+def api_session_export_csv(session_id):
+    """Exporta los datos raw de una sesión como archivo CSV."""
+    limit = request.args.get("limit", 5000, type=int)
+    data  = db.query_session_data(session_id, limit)
+
+    buf = io.StringIO()
+    if data:
+        writer = csv.DictWriter(buf, fieldnames=data[0].keys())
+        writer.writeheader()
+        writer.writerows(data)
+    else:
+        buf.write("time,emg_mv,ax,ay,az,gx,gy,gz,acc_mag,roll,pitch\n")
+
+    filename = f"session_{session_id}.csv"
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 @app.route("/api/health")
