@@ -5,7 +5,7 @@
 # MQTT
 MQTT_BROKER   = "localhost"
 MQTT_PORT     = 1883
-MQTT_TOPIC    = "parkinson/data"
+MQTT_TOPIC   = "parkinson/+/data"
 
 # InfluxDB v1
 INFLUX_HOST   = "localhost"

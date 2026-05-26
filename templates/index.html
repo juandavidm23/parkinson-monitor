@@ -1,175 +1,1006 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NeuroTrack — Parkinson Monitor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Syne:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css">
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Monitor — Parkinson</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="/static/js/socket.io.min.js" crossorigin="anonymous"></script>
+<style>
+:root{
+  --bg:       #f5f1ea;
+  --surface:  #ffffff;
+  --ink:      #1f2a24;
+  --ink-soft: #4b5a52;
+  --ink-mute: #7a8780;
+  --line:     #e6dfd2;
+
+  --calm-bg:  #e6f1e3;
+  --calm-bg2: #d6e7d1;
+  --calm-fg:  #2f5d3a;
+  --calm-dot: #5a9968;
+
+  --alert-bg:  #fbe3df;
+  --alert-bg2: #f5cec8;
+  --alert-fg:  #8a2f24;
+  --alert-dot: #c4564a;
+
+  --warn-fg: #8a6a1c;
+  --warn-bg: #f6ecd0;
+
+  --radius-l: 28px;
+  --radius-m: 18px;
+  --shadow: 0 1px 0 rgba(0,0,0,.02), 0 8px 24px -16px rgba(31,42,36,.18);
+  --font: 'Lexend', system-ui, sans-serif;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+body{
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.shell{ max-width:1280px; margin:0 auto; padding:28px 28px 60px; }
+
+/* ── topbar ── */
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:22px; gap:16px; flex-wrap:wrap;
+}
+.brand{ display:flex; align-items:center; gap:14px; }
+.brand-mark{
+  width:46px; height:46px; border-radius:14px;
+  background:var(--ink); color:var(--bg);
+  display:grid; place-items:center; font-weight:700;
+}
+.brand-mark svg{ width:24px; height:24px; }
+.brand-text .name{ font-size:20px; font-weight:600; letter-spacing:-.01em; }
+.brand-text .who{ font-size:15px; color:var(--ink-mute); }
+.topbar-right{ display:flex; align-items:center; gap:16px; }
+.conn{
+  display:flex; align-items:center; gap:10px;
+  background:var(--surface); border:1px solid var(--line);
+  padding:10px 16px; border-radius:999px;
+  font-size:15px; color:var(--ink-soft);
+}
+.conn .led{
+  width:10px; height:10px; border-radius:50%;
+  background:var(--ink-mute);
+}
+.conn.live .led{
+  background:var(--calm-dot);
+  animation:pulse-dot 2s ease-in-out infinite;
+}
+.conn.rec .led{
+  background:#c4564a;
+  animation:pulse-dot 1s ease-in-out infinite;
+}
+@keyframes pulse-dot{
+  0%,100%{ box-shadow:0 0 0 0 rgba(90,153,104,.4); }
+  50%    { box-shadow:0 0 0 8px rgba(90,153,104,0); }
+}
+.clock{ font-size:15px; color:var(--ink-mute); }
+
+/* ── phases ── */
+.phase{ display:none; }
+.phase.active{ display:block; }
+
+/* ── WAITING phase ── */
+.waiting-center{
+  display:flex; flex-direction:column; align-items:center;
+  justify-content:center; padding:80px 20px; text-align:center; gap:24px;
+}
+.waiting-icon{
+  width:96px; height:96px; border-radius:50%;
+  background:var(--surface); border:2px solid var(--line);
+  display:grid; place-items:center;
+  color:var(--ink-mute);
+}
+.waiting-icon svg{ width:48px; height:48px; }
+.waiting-title{ font-size:32px; font-weight:700; color:var(--ink-soft); }
+.waiting-sub{ font-size:20px; color:var(--ink-mute); max-width:400px; }
+.waiting-dots span{
+  display:inline-block; width:10px; height:10px; border-radius:50%;
+  background:var(--ink-mute); margin:0 4px; opacity:.3;
+  animation:dot-blink 1.4s ease-in-out infinite;
+}
+.waiting-dots span:nth-child(2){ animation-delay:.2s; }
+.waiting-dots span:nth-child(3){ animation-delay:.4s; }
+@keyframes dot-blink{
+  0%,80%,100%{ opacity:.3; transform:scale(1); }
+  40%        { opacity:1;  transform:scale(1.3); }
+}
+
+/* ── RECORDING phase ── */
+.rec-hero{
+  background:var(--surface); border-radius:var(--radius-l);
+  border:1px solid var(--line); box-shadow:var(--shadow);
+  padding:44px 48px; margin-bottom:22px;
+  display:flex; align-items:center; justify-content:space-between; gap:32px;
+}
+.rec-left{ display:flex; align-items:center; gap:28px; }
+.rec-pulse{
+  width:80px; height:80px; border-radius:50%;
+  background:#fbe3df; display:grid; place-items:center; flex-shrink:0;
+  position:relative;
+}
+.rec-pulse::after{
+  content:''; position:absolute; inset:-8px;
+  border-radius:50%; border:3px solid rgba(196,86,74,.3);
+  animation:rec-ring 1.2s ease-out infinite;
+}
+@keyframes rec-ring{
+  0%  { transform:scale(.85); opacity:1; }
+  100%{ transform:scale(1.2); opacity:0; }
+}
+.rec-dot{
+  width:32px; height:32px; border-radius:50%;
+  background:#c4564a;
+  animation:rec-blink .8s ease-in-out infinite alternate;
+}
+@keyframes rec-blink{
+  from{ opacity:.6; } to{ opacity:1; }
+}
+.rec-text .label{
+  font-size:17px; font-weight:500; text-transform:uppercase;
+  letter-spacing:.1em; color:var(--ink-mute);
+}
+.rec-text .title{
+  font-size:clamp(36px,4.5vw,52px); font-weight:700;
+  letter-spacing:-.02em; margin-top:6px; color:var(--ink);
+}
+.rec-text .sub{ font-size:18px; color:var(--ink-soft); margin-top:8px; }
+.rec-right{ text-align:right; flex-shrink:0; }
+.timer-label{ font-size:15px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-mute); }
+.timer-value{ font-size:52px; font-weight:700; letter-spacing:-.02em; color:var(--ink); margin-top:4px; font-variant-numeric:tabular-nums; }
+
+.rec-charts{
+  display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:22px;
+}
+.rec-chart-wrap{
+  background:var(--surface); border-radius:var(--radius-m);
+  border:1px solid var(--line); padding:16px 20px;
+}
+.rec-chart-label{
+  font-size:14px; color:var(--ink-mute); text-transform:uppercase;
+  letter-spacing:.06em; margin-bottom:10px;
+}
+.chart-box{
+  background:#faf7f0; border:1px solid var(--line);
+  border-radius:12px; height:120px; overflow:hidden;
+}
+.chart-box canvas{ display:block; width:100%; height:100%; }
+
+.btn-finalizar{
+  display:block; width:100%;
+  padding:22px; border-radius:var(--radius-m);
+  background:var(--ink); color:var(--bg);
+  font-family:var(--font); font-size:22px; font-weight:600;
+  letter-spacing:-.01em; border:none; cursor:pointer;
+  transition:background .2s, transform .1s;
+}
+.btn-finalizar:hover{ background:#2f3e35; }
+.btn-finalizar:active{ transform:scale(.99); }
+
+/* ── RESULTS phase ── */
+.grid{ display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+.card{
+  background:var(--surface); border-radius:var(--radius-l);
+  padding:28px; box-shadow:var(--shadow); border:1px solid var(--line);
+}
+.card h2{
+  margin:0 0 4px; font-size:16px; font-weight:500;
+  color:var(--ink-mute); text-transform:uppercase; letter-spacing:.08em;
+}
+
+/* semáforo */
+.state{
+  grid-column:1/-1; padding:44px 48px;
+  border-radius:var(--radius-l); border:1px solid var(--line);
+  box-shadow:var(--shadow);
+  display:flex; align-items:center; justify-content:space-between;
+  gap:32px; transition:background 600ms ease, border-color 600ms ease;
+}
+.state.calm{
+  background:linear-gradient(135deg,var(--calm-bg),var(--calm-bg2));
+  border-color:#cee0c8;
+}
+.state.alert{
+  background:linear-gradient(135deg,var(--alert-bg),var(--alert-bg2));
+  border-color:#f0bdb5;
+  animation:card-pulse 1.6s ease-in-out infinite;
+}
+@keyframes card-pulse{
+  0%,100%{ box-shadow:var(--shadow); }
+  50%    { box-shadow:0 1px 0 rgba(0,0,0,.02),0 12px 36px -16px rgba(196,86,74,.35),inset 0 0 0 3px rgba(196,86,74,.18); }
+}
+.state-left{ display:flex; align-items:center; gap:28px; }
+
+/* semáforo visual */
+.traffic{
+  background:#222; border-radius:36px;
+  padding:12px 9px; display:flex; flex-direction:column;
+  gap:10px; flex-shrink:0; width:54px;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+}
+.tl{
+  width:36px; height:36px; border-radius:50%;
+  opacity:.12; transition:opacity .35s, box-shadow .35s;
+}
+.tl.red   { background:#ff4040; }
+.tl.yellow{ background:#ffb300; }
+.tl.green { background:#00c853; }
+.tl.on    { opacity:1; }
+.tl.red.on   { box-shadow:0 0 14px rgba(255,64,64,.8); }
+.tl.yellow.on{ box-shadow:0 0 14px rgba(255,179,0,.8); }
+.tl.green.on { box-shadow:0 0 14px rgba(0,200,83,.8); }
+
+.state-text .label{
+  font-size:17px; font-weight:500; text-transform:uppercase;
+  letter-spacing:.1em; opacity:.7;
+}
+.state-text .title{
+  font-size:clamp(40px,5.4vw,64px); font-weight:700;
+  letter-spacing:-.02em; line-height:1.05; margin-top:6px;
+}
+.state-text .sub{ font-size:20px; margin-top:10px; opacity:.78; }
+.state.calm  .state-text{ color:var(--calm-fg); }
+.state.alert .state-text{ color:var(--alert-fg); }
+.state-right{ text-align:right; flex-shrink:0; }
+.state-right .since-label{
+  font-size:15px; text-transform:uppercase; letter-spacing:.08em; opacity:.65;
+}
+.state-right .since-value{
+  font-size:32px; font-weight:600; margin-top:4px; letter-spacing:-.01em;
+}
+.state.calm  .state-right{ color:var(--calm-fg); }
+.state.alert .state-right{ color:var(--alert-fg); }
+
+/* intensity */
+.intensity-row{ display:flex; align-items:baseline; justify-content:space-between; margin-top:8px; }
+.intensity-row .value{ font-size:36px; font-weight:600; letter-spacing:-.01em; }
+.intensity-row .qualifier{ font-size:22px; color:var(--ink-soft); font-weight:500; }
+.bar{
+  margin-top:22px; height:28px; background:#efe9dc;
+  border-radius:999px; position:relative; overflow:hidden;
+}
+.bar-fill{
+  position:absolute; inset:0; width:0%;
+  background:linear-gradient(90deg,#8cc28c 0%,#e6c66a 55%,#d97961 100%);
+  border-radius:999px; transition:width 600ms cubic-bezier(.22,.61,.36,1);
+}
+.bar-marker{
+  position:absolute; top:-6px; bottom:-6px; width:4px;
+  background:var(--ink); border-radius:4px; transform:translateX(-2px);
+  transition:left 600ms cubic-bezier(.22,.61,.36,1);
+  box-shadow:0 0 0 3px var(--surface);
+}
+.bar-labels{
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  margin-top:12px; font-size:16px; color:var(--ink-mute); font-weight:500;
+}
+.bar-labels span:nth-child(2){ text-align:center; }
+.bar-labels span:nth-child(3){ text-align:right; }
+
+/* summary */
+.summary-pct{
+  font-size:72px; font-weight:700; letter-spacing:-.03em;
+  line-height:1; margin-top:8px;
+}
+.summary-pct .unit{ font-size:28px; color:var(--ink-mute); font-weight:500; margin-left:6px; }
+.summary-text{ margin-top:14px; font-size:20px; color:var(--ink-soft); line-height:1.45; }
+.verdict{
+  margin-top:22px; display:inline-flex; align-items:center; gap:12px;
+  padding:12px 20px; border-radius:999px; font-size:18px; font-weight:600;
+}
+.verdict .dot{ width:12px; height:12px; border-radius:50%; }
+.verdict.bien     { background:var(--calm-bg);  color:var(--calm-fg);  }
+.verdict.bien .dot{ background:var(--calm-dot); }
+.verdict.regular  { background:var(--warn-bg);  color:var(--warn-fg);  }
+.verdict.regular .dot{ background:#d6a23a; }
+.verdict.atencion { background:var(--alert-bg); color:var(--alert-fg); }
+.verdict.atencion .dot{ background:var(--alert-dot); }
+
+/* charts en resultados */
+.chart-card{ grid-column:1/-1; padding:24px 28px 22px; }
+.chart-head{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.chart-head .left{ display:flex; align-items:center; gap:16px; }
+.ch-icon{
+  width:44px; height:44px; border-radius:14px;
+  display:grid; place-items:center; flex-shrink:0;
+}
+.ch-icon svg{ width:24px; height:24px; }
+.ch-icon.emg { background:#f3e6cf; color:#8a6321; }
+.ch-icon.move{ background:#e6efde; color:#4a7a52; }
+.chart-head .titles h2{ margin:0; font-size:16px; font-weight:500; color:var(--ink-mute); text-transform:uppercase; letter-spacing:.08em; }
+.chart-head .titles .lead{ font-size:22px; font-weight:600; color:var(--ink); margin-top:2px; }
+.chart-head .reading{ text-align:right; line-height:1.2; }
+.chart-head .reading .big{ font-size:28px; font-weight:700; color:var(--ink); }
+.chart-head .reading .small{ font-size:14px; color:var(--ink-mute); text-transform:uppercase; letter-spacing:.08em; }
+.emg-meter{ width:140px; height:10px; background:#efe9dc; border-radius:999px; overflow:hidden; margin-top:8px; margin-left:auto; }
+.emg-meter > span{ display:block; height:100%; width:0%; background:linear-gradient(90deg,#d6b06a,#b87a2a); border-radius:999px; transition:width 250ms ease; }
+.chart-wrap{ margin-top:16px; background:#faf7f0; border:1px solid var(--line); border-radius:var(--radius-m); height:180px; position:relative; overflow:hidden; }
+.chart-wrap canvas{ display:block; width:100%; height:100%; }
+.chart-foot{ margin-top:10px; display:flex; justify-content:space-between; font-size:14px; color:var(--ink-mute); }
+
+/* timeline */
+.timeline-card{ grid-column:1/-1; }
+.timeline-head{ display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.timeline-head .right{ display:flex; gap:18px; font-size:15px; color:var(--ink-mute); }
+.legend{ display:inline-flex; align-items:center; gap:8px; }
+.legend .sw{ width:14px; height:14px; border-radius:4px; }
+.legend .sw.calm { background:var(--calm-dot); }
+.legend .sw.alert{ background:var(--alert-dot); }
+.timeline{
+  margin-top:18px; height:84px; background:#efe9dc;
+  border-radius:var(--radius-m); display:flex; overflow:hidden; border:1px solid var(--line);
+}
+.timeline .cell{ flex:1 1 0; height:100%; transition:background-color 400ms ease; background:#efe9dc; }
+.timeline .cell.calm { background:var(--calm-dot); }
+.timeline .cell.alert{ background:var(--alert-dot); }
+.timeline .cell + .cell{ border-left:1px solid rgba(255,255,255,.35); }
+.timeline-axis{ margin-top:10px; display:flex; justify-content:space-between; font-size:15px; color:var(--ink-mute); padding:0 4px; }
+
+/* btn nueva medicion */
+.btn-nueva{
+  display:block; width:100%; margin-top:22px;
+  padding:20px; border-radius:var(--radius-m);
+  background:var(--surface); color:var(--ink);
+  font-family:var(--font); font-size:20px; font-weight:600;
+  border:2px solid var(--line); cursor:pointer;
+  transition:border-color .2s, background .2s;
+}
+.btn-nueva:hover{ border-color:var(--calm-dot); background:var(--calm-bg); }
+
+.hint{ margin-top:28px; font-size:15px; color:var(--ink-mute); text-align:center; }
+
+@media(max-width:880px){
+  .shell{ padding:20px 18px 40px; }
+  .grid{ grid-template-columns:1fr; }
+  .state{ flex-direction:column; align-items:flex-start; padding:32px; }
+  .state-right{ text-align:left; }
+  .rec-charts{ grid-template-columns:1fr; }
+  .rec-hero{ flex-direction:column; align-items:flex-start; padding:32px; }
+  .rec-right{ text-align:left; }
+  .summary-pct{ font-size:60px; }
+}
+@media(prefers-reduced-motion:reduce){
+  .state.alert, .rec-pulse::after, .conn.live .led, .conn.rec .led{ animation:none; }
+}
+</style>
 </head>
 <body>
+<div class="shell">
 
-<header>
-  <div class="logo">
-    <div class="logo-icon">
-      <svg viewBox="0 0 18 18" fill="none" width="18" height="18">
-        <path d="M9 2C9 2 4 5 4 10a5 5 0 0010 0c0-5-5-8-5-8z" stroke="white" stroke-width="1.5" fill="none"/>
-        <circle cx="9" cy="10" r="2" fill="white" opacity="0.8"/>
-      </svg>
-    </div>
-    <div>
-      <div class="logo-text">NeuroTrack</div>
-      <div class="logo-sub">PARKINSON MONITOR v1.0</div>
-    </div>
-  </div>
-  <div class="status-bar">
-    <div style="display:flex;align-items:center;gap:6px">
-      <div class="status-dot" id="statusDot"></div>
-      <span class="status-label mono" id="statusLabel">CONECTANDO...</span>
-    </div>
-    <div class="session-badge mono" id="sessionBadge">session: —</div>
-    <div class="session-badge mono" id="patientBadge">patient: —</div>
-  </div>
-</header>
-
-<div class="main">
-
-  <!-- KPI row -->
-  <div class="kpi-row">
-    <div class="kpi" style="--kpi-color:#00e5a0">
-      <div class="kpi-label">EMG RMS</div>
-      <div class="kpi-val mono" id="kpiRms">—</div>
-      <div class="kpi-unit">mV</div>
-    </div>
-    <div class="kpi" style="--kpi-color:#0096ff">
-      <div class="kpi-label">Frec. EMG</div>
-      <div class="kpi-val mono" id="kpiFreqEmg">—</div>
-      <div class="kpi-unit">Hz</div>
-    </div>
-    <div class="kpi" style="--kpi-color:#ffa502">
-      <div class="kpi-label">Frec. ACC</div>
-      <div class="kpi-val mono" id="kpiFreqAcc">—</div>
-      <div class="kpi-unit">Hz</div>
-    </div>
-    <div class="kpi" style="--kpi-color:#ff4757">
-      <div class="kpi-label">Tremor</div>
-      <div class="kpi-val mono" id="kpiTremor" style="color:#4a5568">—</div>
-      <div class="kpi-unit" id="kpiTremorSub">esperando datos</div>
-    </div>
-    <div class="kpi" style="--kpi-color:#a29bfe">
-      <div class="kpi-label">Muestras</div>
-      <div class="kpi-val mono" id="kpiSamples">0</div>
-      <div class="kpi-unit">esta sesion</div>
-    </div>
-  </div>
-
-  <!-- 3D Panel -->
-  <div class="panel panel-3d">
-    <div class="panel-header">
-      <div class="panel-title">Orientacion 3D — MPU6050</div>
-      <div class="panel-tag">Three.js · tiempo real</div>
-    </div>
-    <canvas id="canvas3d"></canvas>
-    <div class="orient-grid">
-      <div class="orient-card">
-        <div class="orient-label">Roll</div>
-        <div class="orient-val roll mono" id="rollVal">0.0°</div>
-      </div>
-      <div class="orient-card">
-        <div class="orient-label">Pitch</div>
-        <div class="orient-val pitch mono" id="pitchVal">0.0°</div>
-      </div>
-      <div class="orient-card">
-        <div class="orient-label">|acc|</div>
-        <div class="orient-val acc mono" id="accVal">—</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- EMG Panel -->
-  <div class="panel panel-emg">
-    <div class="panel-header">
-      <div class="panel-title">Señal EMG — MyoWare</div>
-      <div style="display:flex;gap:6px">
-        <button class="btn-sm" id="btnPause">Pausar</button>
-        <button class="btn-sm danger" id="btnClear">Limpiar</button>
-      </div>
-    </div>
-    <canvas id="emgCanvas"></canvas>
-    <div class="emg-footer">
-      <div class="emg-state">
-        <span style="font-size:10px;color:#8892a4">Estado:</span>
-        <span class="state-pill reposo" id="emgState">REPOSO</span>
-      </div>
-      <div class="emg-stats">
-        <div class="emg-stat">
-          <div class="emg-stat-label">Max</div>
-          <div class="emg-stat-val" id="emgMax">—</div>
-        </div>
-        <div class="emg-stat">
-          <div class="emg-stat-label">Min</div>
-          <div class="emg-stat-val" id="emgMin">—</div>
-        </div>
-        <div class="emg-stat">
-          <div class="emg-stat-label">Prom</div>
-          <div class="emg-stat-val" id="emgAvg">—</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="tremor-panel">
-      <div class="panel-header">
-        <div class="panel-title">Analisis tremor</div>
-        <div class="panel-tag" id="tremorTag">INACTIVO</div>
-      </div>
-      <div class="tremor-ring-wrap">
-        <svg width="130" height="130" viewBox="0 0 130 130">
-          <circle cx="65" cy="65" r="52" fill="none" stroke="#1c2330" stroke-width="12"/>
-          <circle cx="65" cy="65" r="52" fill="none" stroke="#00e5a0" stroke-width="12"
-            stroke-dasharray="326.7" stroke-dashoffset="326.7" stroke-linecap="round"
-            transform="rotate(-90 65 65)" id="tremorRing" style="transition:stroke-dashoffset 0.8s ease,stroke 0.5s"/>
-          <text x="65" y="60" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="22" font-weight="600" fill="#e8edf5" id="tremorPct">0%</text>
-          <text x="65" y="78" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="9" fill="#8892a4">tremor sesion</text>
+  <!-- topbar -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12h4l2-4 3 8 2-5 2 2h5"/>
         </svg>
       </div>
-      <div class="freq-grid">
-        <div class="freq-card">
-          <div class="freq-label">f EMG</div>
-          <div class="freq-val mono" id="fEmg">—</div>
-          <div class="freq-unit">Hz</div>
-        </div>
-        <div class="freq-card">
-          <div class="freq-label">f ACC</div>
-          <div class="freq-val mono" id="fAcc">—</div>
-          <div class="freq-unit">Hz</div>
-        </div>
+      <div class="brand-text">
+        <div class="name">Monitor diario</div>
+        <div class="who" id="topbar-who">Paciente</div>
       </div>
-      <div class="tremor-range-note mono">rango parkinson: 3–7 Hz</div>
     </div>
-
-    <div class="sessions-panel">
-      <div class="panel-header">
-        <div class="panel-title">Sesiones guardadas</div>
-        <button class="btn-sm" id="btnExport">Exportar CSV</button>
+    <div class="topbar-right">
+      <div class="clock" id="clock">—</div>
+      <div class="conn" id="conn">
+        <span class="led" aria-hidden="true"></span>
+        <span id="conn-text">Esperando dispositivo…</span>
       </div>
-      <div class="session-list" id="sessionList">
-        <div style="font-size:11px;color:#4a5568;text-align:center;padding:20px;font-family:'JetBrains Mono',monospace">
-          Cargando sesiones...
-        </div>
+    </div>
+  </header>
+
+  <!-- ══ FASE 1: ESPERANDO ══ -->
+  <div class="phase active" id="phase-waiting">
+    <div class="waiting-center">
+      <div class="waiting-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+          <path d="M12 6v6l4 2"/>
+        </svg>
+      </div>
+      <div class="waiting-title">Esperando al dispositivo</div>
+      <div class="waiting-sub">Por favor encienda el sensor y asegúrese de que esté conectado a la red.</div>
+      <div class="waiting-dots">
+        <span></span><span></span><span></span>
       </div>
     </div>
   </div>
 
-</div>
+  <!-- ══ FASE 2: CAPTURANDO ══ -->
+  <div class="phase" id="phase-recording">
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
-<script src="/static/js/arm3d.js"></script>
-<script src="/static/js/charts.js"></script>
-<script src="/static/js/dashboard.js"></script>
+    <div class="rec-hero">
+      <div class="rec-left">
+        <div class="rec-pulse"><div class="rec-dot"></div></div>
+        <div class="rec-text">
+          <div class="label">En curso</div>
+          <div class="title">Tomando medición</div>
+          <div class="sub">El sensor está registrando. Por favor permanezca tranquilo.</div>
+        </div>
+      </div>
+      <div class="rec-right">
+        <div class="timer-label">Duración</div>
+        <div class="timer-value" id="timer">00:00</div>
+      </div>
+    </div>
+
+    <div class="rec-charts">
+      <div class="rec-chart-wrap">
+        <div class="rec-chart-label">Actividad muscular</div>
+        <div class="chart-box"><canvas id="ecg-canvas-rec"></canvas></div>
+      </div>
+      <div class="rec-chart-wrap">
+        <div class="rec-chart-label">Movimiento de la mano</div>
+        <div class="chart-box"><canvas id="mpu-canvas-rec"></canvas></div>
+      </div>
+    </div>
+
+    <button class="btn-finalizar" id="btn-finalizar">
+      Finalizar medición
+    </button>
+
+  </div>
+
+  <!-- ══ FASE 3: RESULTADOS ══ -->
+  <div class="phase" id="phase-results">
+    <main class="grid">
+
+      <!-- estado + semáforo -->
+      <section class="state calm" id="state" aria-live="polite">
+        <div class="state-left">
+
+          <!-- semáforo -->
+          <div class="traffic" aria-hidden="true">
+            <div class="tl red"    id="tl-red"></div>
+            <div class="tl yellow" id="tl-yellow"></div>
+            <div class="tl green"  id="tl-green"></div>
+          </div>
+
+          <div class="state-text">
+            <div class="label">Resultado de la medición</div>
+            <div class="title" id="state-title">En reposo</div>
+            <div class="sub"   id="state-sub">Todo tranquilo durante la sesión.</div>
+          </div>
+        </div>
+        <div class="state-right">
+          <div class="since-label">Duración de la sesión</div>
+          <div class="since-value" id="session-duration">—</div>
+        </div>
+      </section>
+
+      <!-- intensidad -->
+      <section class="card" aria-labelledby="h-int">
+        <h2 id="h-int">Intensidad del temblor</h2>
+        <div class="intensity-row">
+          <div class="value"    id="int-value">Sin temblor</div>
+          <div class="qualifier" id="int-qual"></div>
+        </div>
+        <div class="bar">
+          <div class="bar-fill"   id="bar-fill"></div>
+          <div class="bar-marker" id="bar-marker" style="left:0%"></div>
+        </div>
+        <div class="bar-labels">
+          <span>Leve</span><span>Moderado</span><span>Fuerte</span>
+        </div>
+      </section>
+
+      <!-- resumen del día -->
+      <section class="card" aria-labelledby="h-sum">
+        <h2 id="h-sum">Resumen de la sesión</h2>
+        <div class="summary-pct"><span id="sum-pct">0</span><span class="unit">%</span></div>
+        <div class="summary-text" id="sum-text">No se detectó temblor en la sesión.</div>
+        <div class="verdict bien" id="verdict">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="verdict-text">Bien</span>
+        </div>
+      </section>
+
+      <!-- gráfica actividad muscular -->
+      <section class="card chart-card" aria-labelledby="h-emg">
+        <div class="chart-head">
+          <div class="left">
+            <div class="ch-icon emg" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 14a6 6 0 0 1 6-6h2a4 4 0 0 1 4 4v2"/>
+                <path d="M18 14a4 4 0 0 1-4 4H9a3 3 0 0 1-3-3v-1"/>
+                <path d="M4 20h6"/>
+              </svg>
+            </div>
+            <div class="titles">
+              <h2 id="h-emg">Actividad muscular</h2>
+              <div class="lead">Sensor del antebrazo</div>
+            </div>
+          </div>
+          <div class="reading">
+            <div class="big" id="emg-label">—</div>
+            <div class="small">nivel de actividad</div>
+            <div class="emg-meter"><span id="emg-meter-fill"></span></div>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="ecg-canvas-res"></canvas>
+        </div>
+        <div class="chart-foot">
+          <span>Sesión completa</span>
+          <span id="emg-note">—</span>
+        </div>
+      </section>
+
+      <!-- gráfica movimiento -->
+      <section class="card chart-card" aria-labelledby="h-move">
+        <div class="chart-head">
+          <div class="left">
+            <div class="ch-icon move" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h3l2-6 3 12 3-9 2 5 1-2h4"/>
+              </svg>
+            </div>
+            <div class="titles">
+              <h2 id="h-move">Movimiento de la mano</h2>
+              <div class="lead">Sensor de muñeca</div>
+            </div>
+          </div>
+          <div class="reading">
+            <div class="big" id="mv-label">—</div>
+            <div class="small">nivel de actividad</div>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="mpu-canvas-res"></canvas>
+        </div>
+        <div class="chart-foot">
+          <span>Sesión completa</span>
+          <span id="mv-note">—</span>
+        </div>
+      </section>
+
+      <!-- timeline -->
+      <section class="card timeline-card" aria-labelledby="h-tl">
+        <div class="timeline-head">
+          <div><h2 id="h-tl">Actividad durante la sesión</h2></div>
+          <div class="right">
+            <span class="legend"><span class="sw calm"></span> En reposo</span>
+            <span class="legend"><span class="sw alert"></span> Con temblor</span>
+          </div>
+        </div>
+        <div class="timeline" id="timeline"></div>
+        <div class="timeline-axis">
+          <span>Inicio</span><span>Mitad</span><span>Final</span>
+        </div>
+      </section>
+
+    </main>
+
+    <button class="btn-nueva" id="btn-nueva">
+      Iniciar nueva medición
+    </button>
+
+    <p class="hint">Esta pantalla muestra los resultados de la última medición.</p>
+  </div>
+
+</div><!-- /shell -->
+
+<script>
+/* ============================================================
+   BUFFERS DE DATOS
+   ============================================================ */
+const ECG_HZ = 50, ECG_SEC = 6,  ECG_BUF = ECG_HZ * ECG_SEC;
+const MPU_HZ = 50, MPU_SEC = 10, MPU_BUF = MPU_HZ * MPU_SEC;
+
+const ecgBuf = new Float32Array(ECG_BUF).fill(1650);
+const mpuBuf = new Float32Array(MPU_BUF).fill(0);
+let ecgIdx = 0, mpuIdx = 0;
+
+function pushEcg(v){ ecgBuf[ecgIdx] = v; ecgIdx = (ecgIdx+1) % ECG_BUF; }
+function pushMpu(v){ mpuBuf[mpuIdx] = v; mpuIdx = (mpuIdx+1) % MPU_BUF; }
+function readBuf(buf, idx, len){
+  const out = new Float32Array(len);
+  for(let i=0;i<len;i++) out[i] = buf[(idx+i)%len];
+  return out;
+}
+
+// EMG activity
+let emgEma = 0, emgPeak = 300;
+function estimateEmg(){
+  const s = readBuf(ecgBuf, ecgIdx, ECG_BUF);
+  const win = Math.min(ECG_HZ, s.length);
+  let mean = 0;
+  for(let i=s.length-win;i<s.length;i++) mean+=s[i];
+  mean/=win;
+  let sq = 0;
+  for(let i=s.length-win;i<s.length;i++){ const d=s[i]-mean; sq+=d*d; }
+  const rms = Math.sqrt(sq/win);
+  emgEma = emgEma*0.7 + rms*0.3;
+  emgPeak = Math.max(emgPeak*0.995, emgEma*1.2, 100);
+}
+function emgLevel(){ return Math.max(0, Math.min(1, emgEma/emgPeak)); }
+
+/* ============================================================
+   ESTADO DE LA APP
+   ============================================================ */
+const TIMELINE_CELLS = 60;
+const app = {
+  phase: 'waiting',     // waiting | recording | results
+  connected: false,
+  current: 'REPOSO',
+  intensity: 0,
+  emaAcc: 0,
+  lastTremorTs: null,
+  // sesión
+  recStartTs: null,
+  recDurationMs: 0,
+  // acum diario
+  sessionTremorMs: 0,
+  sessionTotalMs: 0,
+  lastTickTs: Date.now(),
+  // timeline
+  cells: new Array(TIMELINE_CELLS).fill(null),
+  // snapshot para resultados
+  snapshot: null,
+};
+
+// timeline accumulator
+let cellAccum = { calmMs:0, alertMs:0, lastShift: Date.now() };
+
+/* ============================================================
+   MÁQUINA DE FASES
+   ============================================================ */
+function showPhase(name){
+  document.querySelectorAll('.phase').forEach(p => p.classList.remove('active'));
+  document.getElementById('phase-'+name).classList.add('active');
+  app.phase = name;
+}
+
+function startRecording(){
+  // reset session data
+  app.current = 'REPOSO';
+  app.intensity = 0;
+  app.emaAcc = 0;
+  app.lastTremorTs = null;
+  app.sessionTremorMs = 0;
+  app.sessionTotalMs = 0;
+  app.lastTickTs = Date.now();
+  app.cells = new Array(TIMELINE_CELLS).fill(null);
+  app.recStartTs = Date.now();
+  cellAccum = { calmMs:0, alertMs:0, lastShift: Date.now() };
+  ecgBuf.fill(1650); ecgIdx = 0;
+  mpuBuf.fill(0);    mpuIdx = 0;
+  emgEma = 0; emgPeak = 300;
+
+  setConn('rec', 'Midiendo…');
+  showPhase('recording');
+}
+
+function finalizeSession(){
+  app.recDurationMs = Date.now() - app.recStartTs;
+  // tomar snapshot de los datos acumulados
+  app.snapshot = {
+    current:       app.current,
+    intensity:     app.intensity,
+    lastTremorTs:  app.lastTremorTs,
+    tremorPct:     app.sessionTotalMs > 0
+                   ? (app.sessionTremorMs / app.sessionTotalMs) * 100 : 0,
+    cells:         [...app.cells],
+    ecgBuf:        Float32Array.from(ecgBuf),
+    ecgIdx:        ecgIdx,
+    mpuBuf:        Float32Array.from(mpuBuf),
+    mpuIdx:        mpuIdx,
+    emgEma:        emgEma,
+    emgPeak:       emgPeak,
+    duration:      app.recDurationMs,
+  };
+  setConn('live', 'Medición completa');
+  renderResults();
+  showPhase('results');
+}
+
+/* ============================================================
+   INGEST (datos del ESP32)
+   ============================================================ */
+function ingestSensor(d){
+  if(app.phase !== 'recording') return;
+  if(!d) return;
+  if(d.estado_esp === 'TEMBLOR' || d.estado_esp === 'REPOSO'){
+    app.current = d.estado_esp;
+  }
+  if(app.current === 'TEMBLOR') app.lastTremorTs = Date.now();
+  if(typeof d.acc_mag === 'number'){
+    const dev = d.acc_mag - 9.8;
+    app.emaAcc = app.emaAcc*0.85 + Math.abs(dev)*0.15;
+    app.intensity = Math.min(1, app.emaAcc / 6);
+    pushMpu(dev);
+  }
+  if(typeof d.ecg_mv === 'number') pushEcg(d.ecg_mv);
+}
+
+function ingestFeatures(f){
+  if(app.phase !== 'recording') return;
+  if(!f) return;
+  if(f.tremor === 1){ app.current = 'TEMBLOR'; app.lastTremorTs = Date.now(); }
+}
+
+/* ============================================================
+   TICKERS
+   ============================================================ */
+function tickSession(){
+  if(app.phase !== 'recording') return;
+  const now = Date.now();
+  const dt = now - app.lastTickTs;
+  app.lastTickTs = now;
+  app.sessionTotalMs += dt;
+  if(app.current === 'TEMBLOR') app.sessionTremorMs += dt;
+
+  // timeline
+  const elapsed = now - cellAccum.lastShift;
+  if(app.current === 'TEMBLOR') cellAccum.alertMs += elapsed;
+  else                           cellAccum.calmMs  += elapsed;
+  cellAccum.lastShift = now;
+  const cellDuration = (app.recDurationMs || 120000) / TIMELINE_CELLS;
+  if(cellAccum.calmMs + cellAccum.alertMs >= Math.max(cellDuration, 2000)){
+    const v = cellAccum.alertMs > (cellAccum.calmMs+cellAccum.alertMs)*0.15 ? 'alert' : 'calm';
+    app.cells.shift(); app.cells.push(v);
+    cellAccum.calmMs = 0; cellAccum.alertMs = 0;
+  }
+}
+
+/* ============================================================
+   TIMER
+   ============================================================ */
+function updateTimer(){
+  if(app.phase !== 'recording' || !app.recStartTs) return;
+  const s = Math.floor((Date.now() - app.recStartTs) / 1000);
+  const mm = String(Math.floor(s/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  document.getElementById('timer').textContent = `${mm}:${ss}`;
+}
+
+/* ============================================================
+   RENDERIZAR RESULTADOS
+   ============================================================ */
+function renderResults(){
+  const snap = app.snapshot;
+  const tremor = snap.current === 'TEMBLOR';
+
+  // semáforo
+  ['tl-red','tl-yellow','tl-green'].forEach(id => {
+    document.getElementById(id).classList.remove('on');
+  });
+  document.getElementById(tremor ? 'tl-red' : 'tl-green').classList.add('on');
+
+  // hero
+  const $state = document.getElementById('state');
+  $state.classList.remove('calm','alert');
+  $state.classList.add(tremor ? 'alert' : 'calm');
+  document.getElementById('state-title').textContent = tremor ? 'Temblor detectado' : 'En reposo';
+  document.getElementById('state-sub').textContent   = tremor
+    ? 'Se detectó actividad de temblor durante la sesión.'
+    : 'No se detectó temblor durante la sesión.';
+
+  // duración
+  const durS  = Math.floor(snap.duration / 1000);
+  const durMm  = String(Math.floor(durS/60)).padStart(2,'0');
+  const durSs  = String(durS%60).padStart(2,'0');
+  document.getElementById('session-duration').textContent = `${durMm}:${durSs}`;
+
+  // intensidad
+  const pct = snap.intensity * 100;
+  document.getElementById('bar-fill').style.width   = pct+'%';
+  document.getElementById('bar-marker').style.left  = pct+'%';
+  if(pct < 5){
+    document.getElementById('int-value').textContent = 'Sin temblor';
+    document.getElementById('int-qual').textContent  = '';
+  } else if(pct < 33){
+    document.getElementById('int-value').textContent = 'Leve';
+    document.getElementById('int-qual').textContent  = 'apenas perceptible';
+  } else if(pct < 66){
+    document.getElementById('int-value').textContent = 'Moderado';
+    document.getElementById('int-qual').textContent  = 'temblor notable';
+  } else {
+    document.getElementById('int-value').textContent = 'Fuerte';
+    document.getElementById('int-qual').textContent  = 'temblor intenso';
+  }
+
+  // resumen
+  const tp = Math.round(snap.tremorPct);
+  document.getElementById('sum-pct').textContent  = tp;
+  document.getElementById('sum-text').textContent =
+    tp === 0
+      ? 'No se detectó temblor durante la sesión.'
+      : `Se detectó temblor durante el ${tp}% del tiempo de la sesión.`;
+  let vcls='bien', vtxt='Bien';
+  if(tp >= 30){ vcls='atencion'; vtxt='Atención'; }
+  else if(tp >= 12){ vcls='regular'; vtxt='Regular'; }
+  document.getElementById('verdict').className = 'verdict '+vcls;
+  document.getElementById('verdict-text').textContent = vtxt;
+
+  // EMG readout
+  const lvl = Math.max(0, Math.min(1, snap.emgEma / snap.emgPeak));
+  document.getElementById('emg-meter-fill').style.width = Math.round(lvl*100)+'%';
+  let elbl, enote;
+  if(lvl < 0.18){ elbl='Relajado';   enote='Músculo relajado'; }
+  else if(lvl<.45){ elbl='Leve';     enote='Actividad ligera'; }
+  else if(lvl<.75){ elbl='Activo';   enote='Contracción notable'; }
+  else             { elbl='Muy activo'; enote='Contracción fuerte'; }
+  document.getElementById('emg-label').textContent = elbl;
+  document.getElementById('emg-note').textContent  = enote;
+
+  // movimiento
+  if(tremor){
+    document.getElementById('mv-label').textContent = 'Temblando';
+    document.getElementById('mv-note').textContent  = 'Movimiento irregular detectado';
+  } else {
+    document.getElementById('mv-label').textContent = snap.intensity > 0.15 ? 'En movimiento' : 'Tranquilo';
+    document.getElementById('mv-note').textContent  = 'Sin temblor significativo';
+  }
+
+  // timeline
+  const $tl = document.getElementById('timeline');
+  $tl.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  snap.cells.forEach(v => {
+    const c = document.createElement('div');
+    c.className = 'cell' + (v ? ' '+v : '');
+    frag.appendChild(c);
+  });
+  $tl.appendChild(frag);
+
+  // dibujar gráficas con datos del snapshot
+  drawChart(
+    document.getElementById('ecg-canvas-res'),
+    snap.ecgBuf, snap.ecgIdx, ECG_BUF,
+    '#b87a2a', 'rgba(184,122,42,.16)', 'ecg'
+  );
+  drawChart(
+    document.getElementById('mpu-canvas-res'),
+    snap.mpuBuf, snap.mpuIdx, MPU_BUF,
+    '#4a7a52', 'rgba(90,153,104,.18)', 'mpu'
+  );
+}
+
+/* ============================================================
+   DIBUJO DE GRÁFICAS
+   ============================================================ */
+function setupCanvas(canvas){
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = Math.max(1, Math.round(rect.width*dpr));
+  canvas.height = Math.max(1, Math.round(rect.height*dpr));
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return { ctx, w:rect.width, h:rect.height };
+}
+
+function drawChart(canvas, buf, idx, bufLen, stroke, fill, type){
+  const { ctx, w, h } = setupCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#faf7f0'; ctx.fillRect(0,0,w,h);
+
+  // grid
+  ctx.strokeStyle = type==='ecg' ? 'rgba(138,99,33,.08)' : 'rgba(74,122,82,.08)';
+  ctx.lineWidth=1;
+  for(let i=1;i<4;i++){
+    const y=(h/4)*i;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+  }
+
+  const samples = new Float32Array(bufLen);
+  for(let i=0;i<bufLen;i++) samples[i] = buf[(idx+i)%bufLen];
+
+  let mean=0;
+  for(let i=0;i<samples.length;i++) mean+=samples[i];
+  mean/=samples.length||1;
+
+  let absMax = type==='mpu' ? 0.5 : 100;
+  for(let i=0;i<samples.length;i++){
+    const a = Math.abs(samples[i]-(type==='mpu'?0:mean));
+    if(a>absMax) absMax=a;
+  }
+
+  // fill
+  ctx.beginPath(); ctx.moveTo(0,h/2);
+  for(let i=0;i<samples.length;i++){
+    const x=(i/(samples.length-1))*w;
+    const v = type==='mpu' ? samples[i] : samples[i]-mean;
+    const y=h/2 - (v/absMax)*(h/2-4);
+    ctx.lineTo(x,y);
+  }
+  ctx.lineTo(w,h/2); ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill();
+
+  // line
+  ctx.beginPath(); ctx.strokeStyle=stroke; ctx.lineWidth=2; ctx.lineJoin='round';
+  for(let i=0;i<samples.length;i++){
+    const x=(i/(samples.length-1))*w;
+    const v = type==='mpu' ? samples[i] : samples[i]-mean;
+    const y=h/2 - (v/absMax)*(h/2-4);
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+function drawLive(){
+  drawChart(document.getElementById('ecg-canvas-rec'), ecgBuf, ecgIdx, ECG_BUF, '#b87a2a','rgba(184,122,42,.16)','ecg');
+  drawChart(document.getElementById('mpu-canvas-rec'), mpuBuf, mpuIdx, MPU_BUF, '#4a7a52','rgba(90,153,104,.18)','mpu');
+}
+
+/* ============================================================
+   CONEXIÓN
+   ============================================================ */
+function setConn(kind, text){
+  const $c = document.getElementById('conn');
+  $c.classList.remove('live','rec');
+  if(kind) $c.classList.add(kind);
+  document.getElementById('conn-text').textContent = text;
+}
+
+function connect(){
+  if(typeof io !== 'function'){ setConn('','Sin socket.io'); return; }
+  const url = `${window.location.protocol}//${window.location.hostname}:5000`;
+  let socket;
+  try{ socket = io(url, { reconnection:true, reconnectionAttempts:Infinity, timeout:5000 }); }
+  catch(e){ return; }
+
+  socket.on('connect', () => {
+    app.connected = true;
+    if(app.phase === 'waiting') startRecording();
+    else if(app.phase === 'results') setConn('live','Sistema conectado');
+  });
+  socket.on('disconnect', () => {
+    app.connected = false;
+    if(app.phase === 'recording') setConn('','Señal perdida…');
+    else setConn('','Reconectando…');
+  });
+  socket.on('connect_error', () => {
+    if(!app.connected) setConn('','Sin señal');
+  });
+  socket.on('sensor_data', ingestSensor);
+  socket.on('features',    ingestFeatures);
+}
+
+/* ============================================================
+   BOTONES
+   ============================================================ */
+document.getElementById('btn-finalizar').addEventListener('click', finalizeSession);
+document.getElementById('btn-nueva').addEventListener('click', () => {
+  if(app.connected) startRecording();
+  else              showPhase('waiting');
+});
+
+/* ============================================================
+   LOOP PRINCIPAL
+   ============================================================ */
+function loop(){
+  updateTimer();
+  tickSession();
+  if(app.phase === 'recording'){
+    estimateEmg();
+    drawLive();
+  }
+  requestAnimationFrame(loop);
+}
+
+/* reloj */
+function clockLoop(){
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+clockLoop();
+setInterval(clockLoop, 30000);
+
+requestAnimationFrame(loop);
+connect();
+</script>
 </body>
 </html>

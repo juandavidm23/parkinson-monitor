@@ -1,77 +1,107 @@
-// dashboard.js — logica principal, WebSocket, sesiones
+// dashboard.js — lógica principal, WebSocket, sesiones
 (function () {
-  let sampleCount    = 0;
-  let tremorWindows  = 0, tremorPositive = 0;
+  let sampleCount   = 0;
+  let tremorWindows = 0, tremorPositive = 0;
   let currentSession = null;
 
   const $ = id => document.getElementById(id);
 
-  // ── WebSocket ──────────────────────────────────────────────
+  // ── Semáforo ────────────────────────────────────────────────
+  function actualizarSemaforo(estado) {
+    const rojo     = $('luzRojo');
+    const amarillo = $('luzAmarillo');
+    const verde    = $('luzVerde');
+    const label    = $('semaforoLabel');
+    const sub      = $('semaforoSub');
+
+    rojo.classList.remove('active');
+    amarillo.classList.remove('active');
+    verde.classList.remove('active');
+
+    if (estado === 'TEMBLOR') {
+      rojo.classList.add('active');
+      label.textContent = 'TEMBLOR';
+      label.style.color = '#ff4757';
+      sub.textContent   = 'Temblor detectado';
+    } else {
+      verde.classList.add('active');
+      label.textContent = 'REPOSO';
+      label.style.color = '#00e5a0';
+      sub.textContent   = 'Sin actividad de temblor';
+    }
+  }
+
+  // ── WebSocket ───────────────────────────────────────────────
   const socket = io();
 
   socket.on('connect', function () {
-    $('statusDot').className   = 'status-dot live';
+    $('statusDot').className    = 'status-dot live';
     $('statusLabel').textContent = 'LIVE - 50Hz';
   });
 
   socket.on('disconnect', function () {
-    $('statusDot').className   = 'status-dot error';
+    $('statusDot').className    = 'status-dot error';
     $('statusLabel').textContent = 'DESCONECTADO';
   });
 
   // sensor_data: llega cada 20 ms con datos crudos
   socket.on('sensor_data', function (d) {
-    window.emgChart.push(d.emg_mv);
+    // Gráficas en tiempo real
+    window.ecgChart.push(d.ecg_mv);
+    window.imuChart.push(d.acc_mag);
+
     sampleCount++;
     $('kpiSamples').textContent = sampleCount;
+    $('kpiAccMag').textContent  = (d.acc_mag || 0).toFixed(2);
 
-    // Orientacion 3D
-    window.arm3d.roll  = d.roll  || 0;
-    window.arm3d.pitch = d.pitch || 0;
-    $('rollVal').textContent  = (d.roll  || 0).toFixed(1) + '°';
-    $('pitchVal').textContent = (d.pitch || 0).toFixed(1) + '°';
+    // Valores IMU
+    $('imuAccVal').textContent   = (d.acc_mag   || 0).toFixed(2) + ' m/s²';
+    $('imuGyroVal').textContent  = (d.gyro_degs || 0).toFixed(1) + ' °/s';
+    $('imuOrientVal').textContent =
+      (d.roll  || 0).toFixed(1) + '° / ' +
+      (d.pitch || 0).toFixed(1) + '°';
 
-    // Magnitud acelerometro (ya viene calculada desde el servidor)
-    const mag = d.acc_mag != null ? d.acc_mag
-                                  : Math.sqrt(d.ax**2 + d.ay**2 + d.az**2);
-    $('accVal').textContent = mag.toFixed(3) + 'g';
+    // Semáforo basado en estado del ESP32 (tiempo real)
+    actualizarSemaforo(d.estado_esp || 'REPOSO');
 
-    // Cambio de sesion
+    // Estado músculo en panel ECG
+    const rms  = d.ecg_rms_mv || 0;
+    const stEl = $('ecgState');
+    stEl.className = 'state-pill';
+    if (rms > 400) {
+      stEl.classList.add('temblor');
+      stEl.textContent = 'ACTIVO';
+    } else {
+      stEl.classList.add('reposo');
+      stEl.textContent = 'REPOSO';
+    }
+
+    // Cambio de sesión
     if (d.session_id !== currentSession) {
       currentSession = d.session_id;
       $('sessionBadge').textContent = 'session: ' + d.session_id;
       $('patientBadge').textContent = 'patient: ' + d.patient_id;
       loadSessions();
     }
-
-    // Estado EMG basado en mV (MyoWare: ~0-3300 mV)
-    const norm = d.emg_mv / 3300;
-    const stateEl = $('emgState');
-    stateEl.className = 'state-pill';
-    if (norm < 0.08)      { stateEl.classList.add('reposo');     stateEl.textContent = 'REPOSO'; }
-    else if (norm < 0.35) { stateEl.classList.add('movimiento'); stateEl.textContent = 'MOVIMIENTO'; }
-    else                  { stateEl.classList.add('temblor');    stateEl.textContent = 'ACTIVO'; }
   });
 
-  // features: llega cada 0.5 s con RMS y analisis de tremor
+  // features: llega cada ~0.5 s con análisis por ventana
   socket.on('features', function (f) {
     tremorWindows++;
     if (f.tremor) tremorPositive++;
 
-    // KPI EMG RMS — aqui si es el RMS real, en mV
-    $('kpiRms').textContent = f.emg_rms.toFixed(1);
-
-    $('kpiFreqEmg').textContent = f.f_emg.toFixed(1);
-    $('kpiFreqAcc').textContent = f.f_acc.toFixed(1);
-    $('fEmg').textContent = f.f_emg.toFixed(2);
-    $('fAcc').textContent = f.f_acc.toFixed(2);
+    // KPI
+    $('kpiRms').textContent     = (f.ecg_rms || 0).toFixed(1);
+    $('kpiFreqAcc').textContent = (f.f_acc   || 0).toFixed(1);
+    $('fEcg').textContent       = (f.f_ecg   || 0).toFixed(2);
+    $('fAcc').textContent       = (f.f_acc   || 0).toFixed(2);
 
     const t = f.tremor ? 1 : 0;
     $('kpiTremor').textContent    = t ? 'SI' : 'NO';
     $('kpiTremor').style.color    = t ? '#ff4757' : '#00e5a0';
     $('kpiTremorSub').textContent = t ? 'detectado' : 'no detectado';
 
-    // Anillo de porcentaje
+    // Anillo de porcentaje de sesión
     const pct  = Math.round((tremorPositive / tremorWindows) * 100);
     const circ = 326.7;
     const ring = $('tremorRing');
@@ -86,11 +116,11 @@
       ? 'background:rgba(255,71,87,0.15);color:#ff4757;border:1px solid rgba(255,71,87,0.3);'
       : 'background:rgba(0,229,160,0.1);color:#00e5a0;border:1px solid rgba(0,229,160,0.2);';
 
-    window.arm3d.tremorActive = !!t;
-    window.arm3d.setSensor(!!t);
+    // Timeline
+    window.timelineChart.push(t, f.ecg_rms || 0);
   });
 
-  // ── Sesiones — un solo request al servidor ─────────────────
+  // ── Sesiones ────────────────────────────────────────────────
   function loadSessions() {
     fetch('/api/sessions/summary')
       .then(r => r.json())
@@ -121,24 +151,27 @@
   loadSessions();
   setInterval(loadSessions, 30000);
 
-  // ── Controles EMG ───────────────────────────────────────────
+  // ── Controles ECG ───────────────────────────────────────────
   $('btnPause').addEventListener('click', function () {
-    window.emgChart.paused = !window.emgChart.paused;
-    this.textContent = window.emgChart.paused ? 'Reanudar' : 'Pausar';
-    this.style.borderColor = window.emgChart.paused ? '#ffa502' : '';
-    this.style.color       = window.emgChart.paused ? '#ffa502' : '';
+    window.ecgChart.paused = !window.ecgChart.paused;
+    window.imuChart.paused = !window.imuChart.paused;
+    this.textContent = window.ecgChart.paused ? 'Reanudar' : 'Pausar';
+    this.style.borderColor = window.ecgChart.paused ? '#ffa502' : '';
+    this.style.color       = window.ecgChart.paused ? '#ffa502' : '';
   });
 
   $('btnClear').addEventListener('click', function () {
-    window.emgChart.clear();
+    window.ecgChart.clear();
+    window.imuChart.clear();
+    window.timelineChart.clear();
     sampleCount = 0; tremorWindows = 0; tremorPositive = 0;
     $('kpiSamples').textContent = '0';
-    $('kpiRms').textContent = '—';
+    $('kpiRms').textContent     = '—';
     $('tremorRing').setAttribute('stroke-dashoffset', '326.7');
-    $('tremorPct').textContent = '0%';
+    $('tremorPct').textContent  = '0%';
   });
 
-  // ── Exportar CSV real ───────────────────────────────────────
+  // ── Exportar CSV ────────────────────────────────────────────
   $('btnExport').addEventListener('click', function () {
     if (!currentSession) { alert('No hay sesion activa'); return; }
     window.location.href = '/api/session/' + currentSession + '/export.csv?limit=5000';

@@ -17,9 +17,9 @@ def init_socketio(sio):
     global _socketio
     _socketio = sio
 
-emg_buffer    = deque(maxlen=WINDOW_SIZE)
-acc_buffer    = deque(maxlen=WINDOW_SIZE)
-sample_count  = 0
+ecg_buffer   = deque(maxlen=WINDOW_SIZE)
+acc_buffer   = deque(maxlen=WINDOW_SIZE)
+sample_count = 0
 
 
 def fft_dominant_freq(signal: list) -> float:
@@ -33,41 +33,32 @@ def fft_dominant_freq(signal: list) -> float:
     return float(freqs[np.argmax(fft_mag)])
 
 
-def calcular_features(emg_w: list, acc_w: list) -> dict:
-    emg = np.array(emg_w, dtype=float)
+def calcular_features(ecg_w: list, acc_w: list) -> dict:
+    ecg = np.array(ecg_w, dtype=float)
     acc = np.array(acc_w, dtype=float)
 
-    rms  = float(np.sqrt(np.mean(emg ** 2)))
-    mean = float(np.mean(emg))
-    std  = float(np.std(emg))
-
-    f_emg = fft_dominant_freq(emg_w)
+    # AC RMS: eliminar DC antes de calcular energia
+    rms   = float(np.sqrt(np.mean((ecg - ecg.mean()) ** 2)))
     f_acc = fft_dominant_freq(acc_w)
 
-    in_range = (TREMOR_FREQ_MIN <= f_emg <= TREMOR_FREQ_MAX and
-                TREMOR_FREQ_MIN <= f_acc <= TREMOR_FREQ_MAX)
-    coherent = abs(f_emg - f_acc) < 1.5
-    tremor   = 1 if (in_range and coherent) else 0
+    # Deteccion: frecuencia IMU en rango Parkinson (3-7Hz) + musculo activo
+    acc_in_range  = TREMOR_FREQ_MIN <= f_acc <= TREMOR_FREQ_MAX
+    muscle_active = rms > 30.0  # mV
+    tremor = 1 if (acc_in_range and muscle_active) else 0
 
     return {
-        "rms": rms, "mean": mean, "std": std,
-        "f_emg": f_emg, "f_acc": f_acc,
+        "rms": rms, "f_acc": f_acc,
         "tremor": tremor,
         "acc_mag": float(np.mean(acc)),
     }
 
 
-def _parse_emg(data: dict):
-    """
-    Acepta tanto el formato nuevo (data.emg.mv) como el antiguo (data.raw_emg).
-    Siempre devuelve el valor en mV.
-    """
-    emg_node = data.get("emg")
-    if isinstance(emg_node, dict):
-        return emg_node.get("mv", 0.0)
-    # Formato antiguo: ADC crudo 0-4095 -> mV
-    raw = data.get("raw_emg", 0)
-    return (raw / 4095.0) * 3300.0
+def _parse_ecg(data: dict) -> float:
+    """Retorna ecg_mv del JSON del ESP32."""
+    ecg_node = data.get("ecg", {})
+    if isinstance(ecg_node, dict):
+        return ecg_node.get("mv", 0.0)
+    return 0.0
 
 
 def on_message(client, userdata, msg):
@@ -84,14 +75,17 @@ def on_message(client, userdata, msg):
         patient_id = data["patient_id"]
         session_id = data["session_id"]
 
-        emg_mv = _parse_emg(data)
+        ecg_mv     = _parse_ecg(data)
+        estado_esp = data.get("estado", "REPOSO")
 
-        accel  = data["accel"]
+        accel   = data["accel"]
         ax, ay, az = accel["x"], accel["y"], accel["z"]
-        acc_mag = accel.get("mag", float(np.sqrt(ax**2 + ay**2 + az**2)))
+        # acc_mag ahora viene en m/s2 desde el ESP32
+        acc_mag = accel.get("ms2", float(np.sqrt(ax**2 + ay**2 + az**2) * 9.81))
 
-        gyro   = data["gyro"]
+        gyro    = data["gyro"]
         gx, gy, gz = gyro["x"], gyro["y"], gyro["z"]
+        gyro_degs  = gyro.get("degs", float(np.sqrt(gx**2 + gy**2 + gz**2)))
 
         orient = data.get("orientation", {})
         roll   = orient.get("roll",  0.0)
@@ -101,37 +95,23 @@ def on_message(client, userdata, msg):
         print(f"[MQTT] Campo faltante en JSON: {e}")
         return
 
-    # 1. Guardar raw en InfluxDB
-    db.write_raw({
-        "device_id": device_id, "patient_id": patient_id,
-        "session_id": session_id,
-        "emg_mv": emg_mv,
-        "ax": ax, "ay": ay, "az": az, "acc_mag": acc_mag,
-        "gx": gx, "gy": gy, "gz": gz,
-        "roll": roll, "pitch": pitch,
-    })
-
-    # 2. Emitir por WebSocket (tiempo real)
+    # 1. Emitir por WebSocket (tiempo real) — solo lo que el dashboard usa
     if _socketio:
         _socketio.emit("sensor_data", {
-            "ts":       data.get("ts", 0),
-            "emg_mv":   round(emg_mv, 2),
-            "ax": ax, "ay": ay, "az": az, "acc_mag": round(acc_mag, 4),
-            "gx": gx, "gy": gy, "gz": gz,
-            "roll":     roll,
-            "pitch":    pitch,
+            "ecg_mv":     round(ecg_mv, 2),
+            "acc_mag":    round(acc_mag, 3),
+            "estado_esp": estado_esp,
             "session_id": session_id,
-            "patient_id": patient_id,
         })
 
-    # 3. Acumular en buffers para features
-    emg_buffer.append(emg_mv)
+    # 2. Acumular en buffers para features
+    ecg_buffer.append(ecg_mv)
     acc_buffer.append(acc_mag)
     sample_count += 1
 
-    # 4. Calcular features cada WINDOW_STEP muestras
-    if len(emg_buffer) == WINDOW_SIZE and sample_count % WINDOW_STEP == 0:
-        feats = calcular_features(list(emg_buffer), list(acc_buffer))
+    # 3. Calcular features cada WINDOW_STEP muestras
+    if len(ecg_buffer) == WINDOW_SIZE and sample_count % WINDOW_STEP == 0:
+        feats = calcular_features(list(ecg_buffer), list(acc_buffer))
         feats.update({
             "device_id": device_id,
             "patient_id": patient_id,
@@ -141,22 +121,21 @@ def on_message(client, userdata, msg):
 
         if _socketio:
             _socketio.emit("features", {
-                "tremor":   feats["tremor"],
-                "f_emg":    round(feats["f_emg"], 2),
-                "f_acc":    round(feats["f_acc"], 2),
-                "emg_rms":  round(feats["rms"], 2),
+                "tremor":     feats["tremor"],
+                "f_acc":      round(feats["f_acc"], 2),
+                "ecg_rms":    round(feats["rms"], 2),
                 "session_id": session_id,
             })
 
         print(f"[Features] tremor={feats['tremor']} | "
-              f"f_emg={feats['f_emg']:.2f}Hz | "
               f"f_acc={feats['f_acc']:.2f}Hz | "
-              f"rms={feats['rms']:.2f}mV")
+              f"rms={feats['rms']:.2f}mV | "
+              f"estado_esp={estado_esp}")
 
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print(f"[MQTT] Conectado — suscrito a '{MQTT_TOPIC}'")
+        print(f"[MQTT] Conectado - suscrito a '{MQTT_TOPIC}'")
         client.subscribe(MQTT_TOPIC)
     else:
         print(f"[MQTT] Error conexion rc={rc}")
